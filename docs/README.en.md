@@ -39,7 +39,7 @@ A Claude Code / Codex / OpenClaw Skill. Once installed in your agent, a single n
 
 ## ✨ What it does
 
-- 🎨 **10 curated styles + a distilled style library** — built-ins include Spatial Glass / Tech Blue / Editorial Mono / Dark Aurora / Risograph / Wabi / Swiss Grid / Hand Sketch / Y2K Chrome / Vector Illustration; 22 additional reusable styles were distilled and selected from 500+ online PPT template candidates
+- 🎨 **10 curated styles + an expanded style library** — built-ins include Spatial Glass / Tech Blue / Editorial Mono / Dark Aurora / Risograph / Wabi / Swiss Grid / Hand Sketch / Y2K Chrome / Vector Illustration; on 2026-05-26, 22 additional high-quality styles were selected from 500+ publicly available PPT templates
 - 🪄 **Template-clone mode** — drop in any `.pptx`; the agent follows its layout, palette, and illustration language, then swaps in your new content
 - 🎯 **Natural-language slide edits** — say "change slide 3's subtitle", "remove the footer", or "replace these three metrics", and the agent regenerates only the target slide
 - 🎮 **Dual output** — high-res PNG per slide + 16:9 `.pptx` ready to use
@@ -77,9 +77,9 @@ A Claude Code / Codex / OpenClaw Skill. Once installed in your agent, a single n
 | `hand-sketch` | Sketchnote / whiteboard | Workshops, product brainstorming, training |
 | `y2k-chrome` | Y2K liquid chrome + butterfly stickers | Streetwear, entertainment, brand collabs, Gen-Z marketing |
 
-## 🧬 Distilled style library: 22 styles from 500+ PPT candidates
+## 🧬 Expanded style library: 22 new styles added on 2026-05-26
 
-We added a web-template distillation workflow: public online preview images are scored for visual quality and reusability, abstract style rules are extracted with a multimodal model, and each accepted style is validated by generating a fresh `gpt-image-2` cover. The current library contains 22 selected styles, and distillation is ongoing. Good template/style references are welcome.
+On 2026-05-26, we added 22 high-quality styles selected from 500+ publicly available PPT templates. More styles will continue to be added, and good PPT template or style references are welcome.
 
 See the full style table, thumbnails, style IDs, visual traits, and use cases in [`distilled-styles.md`](./distilled-styles.md).
 
