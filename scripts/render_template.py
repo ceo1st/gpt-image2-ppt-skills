@@ -13,6 +13,8 @@ and is left in place for inspection (gitignored under template_renders/).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -23,6 +25,7 @@ from typing import Optional
 
 
 DEFAULT_RENDERS_DIR_NAME = "template_renders"
+RENDER_MANIFEST = "_render_manifest.json"
 
 
 def _safe_stem(name: str) -> str:
@@ -32,6 +35,55 @@ def _safe_stem(name: str) -> str:
 
 def default_out_dir(pptx_path: Path) -> Path:
     return Path.cwd() / DEFAULT_RENDERS_DIR_NAME / _safe_stem(pptx_path.stem)
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _render_manifest_path(out_dir: Path) -> Path:
+    return out_dir / RENDER_MANIFEST
+
+
+def _render_cache_valid(pptx_path: Path, out_dir: Path, existing: list[Path]) -> bool:
+    manifest_path = _render_manifest_path(out_dir)
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return (
+        manifest.get("source_path") == str(pptx_path)
+        and manifest.get("source_sha256") == _file_sha256(pptx_path)
+        and manifest.get("page_count") == len(existing)
+    )
+
+
+def _write_render_manifest(pptx_path: Path, out_dir: Path, page_count: int) -> None:
+    manifest = {
+        "source_path": str(pptx_path),
+        "source_sha256": _file_sha256(pptx_path),
+        "page_count": page_count,
+    }
+    _render_manifest_path(out_dir).write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _cleanup_extra_pages(out_dir: Path, page_count: int) -> None:
+    """Remove stale page-NN.png files only after a successful fresh render."""
+    for page in out_dir.glob("page-*.png"):
+        m = re.search(r"page-(\d+)\.png$", page.name)
+        if not m:
+            continue
+        if int(m.group(1)) > page_count:
+            page.unlink(missing_ok=True)
 
 
 def render_pptx_to_pngs(
@@ -53,18 +105,24 @@ def render_pptx_to_pngs(
     if not force:
         existing = sorted(out_dir.glob("page-*.png"))
         if existing:
-            print(f"📦 已渲染 {len(existing)} 页 -> {out_dir}（用 --force 强制重渲）")
-            return out_dir
+            if _render_cache_valid(pptx_path, out_dir, existing):
+                print(f"📦 已渲染 {len(existing)} 页 -> {out_dir}（用 --force 强制重渲）")
+                return out_dir
+            print(f"(!)  模板渲染缓存已过期，重新渲染 -> {out_dir}")
 
     # Windows: try PowerPoint COM first (direct PNG export, no PDF step)
     count = _try_powerpoint_render(pptx_path, out_dir)
     if count is not None:
+        _cleanup_extra_pages(out_dir, count)
+        _write_render_manifest(pptx_path, out_dir, count)
         print(f"[OK] 渲染 {count} 页 -> {out_dir}")
         return out_dir
 
     # macOS: try Keynote AppleScript (direct PNG export, no PDF step)
     count = _try_keynote_render(pptx_path, out_dir)
     if count is not None:
+        _cleanup_extra_pages(out_dir, count)
+        _write_render_manifest(pptx_path, out_dir, count)
         print(f"[OK] 渲染 {count} 页 -> {out_dir}")
         return out_dir
 
@@ -74,6 +132,8 @@ def render_pptx_to_pngs(
 
     print(f"🖼️  PDF -> PNG（dpi={dpi}）...")
     n = _rasterize_pdf(pdf_path, out_dir, dpi=dpi)
+    _cleanup_extra_pages(out_dir, n)
+    _write_render_manifest(pptx_path, out_dir, n)
     print(f"[OK] 渲染 {n} 页 -> {out_dir}")
     return out_dir
 

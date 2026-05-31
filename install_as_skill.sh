@@ -144,6 +144,8 @@ main() {
         --exclude='logs' \
         --exclude='template_cache' \
         --exclude='template_renders' \
+        --exclude='test_runs' \
+        --exclude='tmp' \
         --exclude='venv' \
         --exclude='.venv' \
         --exclude='__pycache__' \

@@ -217,6 +217,8 @@ GPT_IMAGE_QUALITY=high                     # low / medium / high / auto
 
 **5. 打包 PPTX**
 
+如果本 deck 没有外部真实图片对象，可以用下面的简易整页 PNG 打包。**如果任一页有 `external_image` / `image_overlay` / `external_image_placeholder` 且指向真实图片，不能用这个简易打包片段**，否则真实图片会被合进整页背景 PNG，用户无法在 PowerPoint 里单独选中拖动。此时必须走 `generate_ppt.py` 的标准打包逻辑，或在已有 session 中调用 `generate_pptx(..., metadata=metadata)`，让真实图片作为独立 picture object 叠在背景上。
+
 ```bash
 python3 -c "
 from pptx import Presentation
@@ -233,6 +235,11 @@ prs.save('outputs/<timestamp>/<title>.pptx')
 print('done')
 "
 ```
+
+外部真实图片页的正确 PPTX 结构应是：
+
+- 第 1 层：`images/slide-XX.png` 作为整页背景图（包含模型生成的背景和文字）。
+- 第 2 层：`source` 指向的真实图片作为独立 PPT picture object，按 `slide_spec` 坐标贴在背景上，可在 PowerPoint 里选中、拖动、缩放。
 
 ### 模板克隆模式（Codex 原生路径）
 
@@ -322,7 +329,114 @@ GPT_IMAGE_BACKEND=codex              # 不想每次敲 --backend 就设这个
    - `images/slide-XX.png` -- 每页 PNG（16:9，1536x864）
    - `prompts.json` -- 每页用到的完整 prompt（便于复盘 / 二次微调）
    - `metadata.json` -- slide_spec 版本历史（支持精确编辑和回滚）
-   - `<title>.pptx` -- 16:9 整页填充图片的 .pptx，分享 / 投影直接用
+   - `<title>.pptx` -- 16:9 PPTX；默认背景与文字是整页图片，通过 `external_image` 放入的真实图片会作为独立 PPT 图片对象叠加
+
+## 外部真实图片贴入（推荐精确流程）
+
+默认规则：用户提供真实图时，优先按原图保真后贴，不要让 `gpt-image-2` 重画这张图。使用 `slide_spec` 声明外部图片槽位：
+
+这套流程只在元素声明了 `type: "external_image"` / `image_overlay` / `external_image_placeholder` 且 `source` 能解析到真实本地图片文件时启用。没有真实图片 source 的普通生成、模板克隆、纯占位布局和老的自由风格生成不受影响。
+
+如果用户明确说“更重视画面融合效果，不需要一定贴原图 / 可以重绘 / 可以图生图”，可以走参考图模式：把图片作为 generation reference 输入给模型，而不是最终独立后贴。此时版面通常更融合，但不保证像素级保真，PPT 里也不会有可单独选中的原图对象。
+
+参考图模式可用 `type: "image_reference"`，或在 `external_image` 上显式写 `render_mode: "reference"` / `preserve_original: false`：
+
+```json
+{
+  "elements": {
+    "mood_reference": {
+      "type": "image_reference",
+      "source": "/absolute/path/to/photo.png",
+      "purpose": "只作为视觉参考，允许模型融合重绘，不作为独立 PPT 图片对象后贴"
+    }
+  }
+}
+```
+
+不要对高精度素材使用参考图重绘：医疗影像、病理图、诊断依据、实验/工程读数、财务表格、论文图表、法律证据截图、产品 UI 精确截图等都应默认走 `external_image` 保真后贴，并在交付前提示用户核对。
+
+```json
+{
+  "elements": {
+    "hero_photo": {
+      "type": "external_image",
+      "source": "/absolute/path/to/photo.png",
+      "layout_intent": "auto",
+      "tailor_to_asset": true,
+      "slot_strategy": "fit-within",
+      "fit": "contain",
+      "slot": {
+        "padding": 0.012,
+        "bleed": 0,
+        "fill": "#F7F7F5",
+        "mask_placeholder": false,
+        "sanitize_background": false,
+        "draw_frame": false,
+        "outline_width": 0,
+        "skeleton_canvas_fill": "transparent",
+        "skeleton_fill": "transparent",
+        "skeleton_shape": "corners",
+        "skeleton_outline": "#000000",
+        "skeleton_outline_width": 2,
+        "skeleton_ticks": false
+      }
+    }
+  }
+}
+```
+
+生成时脚本会自动做四件事：
+
+1. **先规划槽位，再生成 skeleton**。脚本会优先读取模板 profile 里的 `external_image_slots`，或根据模板摘要推断“左图右文 / 右图左文 / 底部图表 / 中央主视觉”等候选区域；然后结合本页文字量、标题长度、真实图片数量、真实图片宽高比和素材分类（照片 / 图表 / 文档 / 架构图等）打分选位，先产出 `position` / `computed_bbox` / `auto_layout_reason` / `layout_planning_profile`。skeleton 只是把这个规划结果画给模型看，不负责临时想位置。
+2. 读取 `source` 真实图片尺寸。如果声明了 `tailor_to_asset: true` 或 `slot_strategy: "fit-within"`，脚本会把 `position` 当作“可用区域”，按真实图片宽高比在其中计算 `computed_bbox`；这个 bbox 会同时用于 prompt、骨架参考图和最终 PPTX 贴图。这样不是生成后再临时缩放，而是在 `gpt-image-2` 出图前就量体裁衣。
+3. 在 `outputs/<timestamp>/references/slide-XX-asset-skeleton.png` 生成一张透明画布的角标骨架参考图，把最终真实图会覆盖的 `final_image_rect_px` 标出来，并作为 reference image 传给 `gpt-image-2`。这只用于引导模型不要把关键信息放进该区域；**每页只调用一次 `gpt-image-2`，不是先生成一张再用骨架二次重生。**
+4. 打包 PPTX 时，按同一个 bbox 用 `python-pptx` 把 `source` 指向的真实图片作为独立图片对象贴入。默认不画额外框，也不铺遮罩；也不会默认清理 `gpt-image-2` 生成图。真实图片不应被合成进 `images/slide-XX.png`，否则用户无法在 PPT 里单独拖动。
+
+如果生成后发现真实图片槽位压到大面积文字或图形，优先按下面两种方式处理：
+
+1. **预生成前微调槽位**：改 `slide_spec.elements.<id>.position`（或 `anchor` / `padding`），让真实素材移动到更干净的区域，再重新生成该页。只要槽位位置变了，就必须重新生成背景；不要只在 PPTX 里移动最终图片，否则背景内容仍可能压住新位置。
+2. **二次版式修复**：当第一页整体风格已经满意，只是局部内容压入槽位时，用 `--edit SLIDE --external-slot-repair`。该模式会同时把当前页和新的 `asset-skeleton` 作为 reference image 传入，要求模型保持原风格但重排文字/图形，让槽位空出来。
+
+示例：把真实图区域右移并重排当前页：
+
+```bash
+python3 scripts/generate_ppt.py \
+  --session outputs/20260529_120000 \
+  --edit 3 \
+  --external-slot-repair \
+  --element-updates '{"hero_photo":{"position":[0.60,0.16,0.32,0.60],"anchor":"center"}}'
+```
+
+同时，每个包含外部真实图片的页面都会在 `outputs/<timestamp>/external_image_trace/slide-XX/` 记录完整中间链路：
+
+- `step1-real-on-blank.png`：把真实图片按最终坐标和大小先贴到空白页上，用来确认“真实图最终应该出现在这里”。
+- `step2-reference-outline-blank.png`：去掉真实图片，只保留给 `gpt-image-2` 的角标定位参考图；默认透明画布，不铺白底。定位区域使用 `final_image_rect_px`，也就是最终真实图实际会覆盖的像素矩形，而不是外层 slot。这张图同时会复制到 `references/slide-XX-asset-skeleton.png` 并作为 image reference 输入。
+- `step3-generated-background.png`：`gpt-image-2` 根据 step2 reference 生成的背景图，尚未贴入真实图片。
+- `step3-image2-raw.png` / `step3-sanitized-background.png`：只有显式设置 `sanitize_background: true` 时才会出现，用于兜底清理模型已经画出的占位块；默认不启用。
+- `step4-final-overlay-preview.png`：在 step3 上按 step1 同一坐标贴回真实图片的预览图，用来和 PPTX 最终效果对照。
+- `manifest.json`：记录每个外部图片的 `source`、`slot_bbox_norm`、`inner_rect_norm`、`reference_rect_px`、`final_image_rect_px`、padding、bleed、素材尺寸和比例。
+
+关键原则：
+
+- reference skeleton 负责“告诉模型哪里不要放关键信息”，不是要求模型画白色空框。
+- 模板克隆 / `--template-strict` 与外部真实图片槽位同时存在时，生成阶段会同时传入两张 reference：模板页用于学习风格，`asset-skeleton` 用于标记后贴图片覆盖区；不要二选一，否则模型只看模板页时不会知道最终图片位置。
+- 外部真实图片页不能简单堆叠“模板照片/图片区 prompt”和“留空 prompt”。构造 prompt 前必须先消解冲突：模板只提供配色、字体、网格、节奏和装饰语言；模板里的照片区、图片框、全幅图、裁切图等都视为已被真实图片槽位替代。
+- 构造 `slide_spec` 时，`position` 不能随便选，也不要默认固定右侧。模板克隆模式下，优先让模板 profile 提供 `external_image_slots`，或从模板布局摘要推断候选图片区，再根据本页文字量、真实图片数量、真实图片比例和页面类型打分：文字多时优先保证标题/正文阅读区；图片多或比例极端时优先用模板原有分栏/上下布局；无法共存时减少装饰和假视觉主体，而不是让真实图压内容。
+- 推荐先写 `layout_intent: "auto"`，不手写 `position`。脚本会读取模板候选槽位、真实图尺寸、文字量、图片数量和比例来选择位置，写入 `position` / `computed_bbox` / `auto_layout_reason`；只有自动规划不理想时才用人工 `position` 覆盖。
+- `position` 默认可作为“允许使用的区域”；`computed_bbox` 才是脚本算出的最终真实图片槽位。
+- 如果你想完全固定坐标，不要量体裁衣，直接写 `bbox`，或设置 `slot_strategy: "exact"` / `tailor_to_asset: false`。
+- 最终精度由 `python-pptx` 坐标保证，不由模型画框保证。
+- `skeleton_outline_width` 只控制给模型看的骨架参考图；`outline_width` / `draw_frame` 才控制最终 PPT 里是否出现可见框。
+- prompt 中不写归一化坐标；位置通过透明角标 reference 图控制，避免模型错误解释数值坐标，也避免闭合框被理解成真实图片框。
+- `skeleton_canvas_fill` / `skeleton_fill` / `skeleton_outline` / `skeleton_outline_width` / `skeleton_shape` 只影响参考骨架图。默认 `skeleton_canvas_fill: "transparent"` 且 `skeleton_shape: "corners"`，只在 `final_image_rect_px` 四角画短角标，不画闭合矩形、不铺白底，避免模型把 reference 理解成真实图片框或白色占位块。需要旧行为时显式设 `skeleton_shape: "outline"`。
+- `sanitize_background` / `mask_placeholder` 不是推荐路径；它们只适合清掉极轻微的占位痕迹，不适合解决文字或图形大面积压住槽位的问题。遇到压内容，按“微调槽位并重生”或“二次版式修复”处理。
+- 默认最终不画外框、不插入任何底色矩形，只贴真实图片；`mask_placeholder` 会被忽略，避免在真实图下方产生可拖动白底。只有显式设置 `draw_frame: true` 且 `outline_width > 0` 时，才会额外画无填充边框。
+- 推荐默认：`tailor_to_asset: true` + `slot_strategy: "fit-within"` + `fit: "contain"` + 少量 `padding`。这会完整保留原图，并让骨架图从一开始就是按素材比例预留的。
+- `fit: "contain"` 保留完整图片；`fit: "cover"` 会居中裁剪图片来铺满槽位。
+- 如果要“严丝合缝”无白边，使用 `fit: "cover"`、`padding: 0`、`outline_width: 0`，并设置很小的 `bleed`（例如 `0.0015`-`0.003`）让图片比槽位多铺出约 1-3px，抵消 PowerPoint / Quick Look 渲染取整和抗锯齿缝隙。
+- 如果想“预留一点但不要莫名空隙”，不要靠后期 `contain` 硬塞进一个比例不匹配的大框；应使用 `fit-within` 先算好比例匹配的槽位，再用很小的 `padding` 做设计留白。
+
+整体原理图保存于 `docs/external_image_overlay_logic.txt`；修改外部真实图片链路时，先对照这张图确认顺序仍是“模板/页面/素材画像 -> 候选槽位打分 -> 透明 skeleton -> 背景生成 -> 后贴真实图 -> 质检/有限修复”。
 
 ## 生成流程（模板克隆）
 
@@ -390,7 +504,7 @@ Agent 在搭 plan 时的执行策略：
 2. 哪些场景稳定，哪些场景需要人工验收。
 3. 是否只改了指定页 / 指定内容。
 4. 最终输出目录和 PPTX 文件在哪里。
-5. 当前不足是什么，例如整页图片式 PPTX、数字小字需复核、真实 logo 需提供素材。
+5. 当前不足是什么，例如背景/文字仍是整页图片、数字小字需复核；真实 logo/产品图需提供素材，才能作为独立图片对象放入。
 
 如果需要介绍修改能力，优先引用 `docs/edit_guide.md` 的场景分级、before / after 案例和当前不足，不要把实现链路放在用户前面。
 
