@@ -6,7 +6,7 @@
 
 A Claude Code / Codex / OpenClaw / Hermes Skill. Once installed in your agent, a single natural-language prompt yields 16:9 high-res images + a ready-to-send `.pptx` — or clones any reference `.pptx` template and reskins it with new content.
 
-**Positioning: possibly one of the best-looking AI PPT Skills available today.** Instead of filling text into traditional templates, it uses the visual taste, composition, and layout strengths of `gpt-image-2` to generate each slide as a complete visual composition, aiming for decks that look polished, consistent, and presentation-ready from cover to inner pages.
+**Possibly one of the best-looking AI PPT Skills available today.** Instead of filling text into traditional templates, it uses the visual taste, composition, and layout strengths of `gpt-image-2` to generate each slide as a complete visual composition, aiming for decks that look polished, consistent, and presentation-ready from cover to inner pages.
 
 The project also includes dedicated optimization for editing image-based PPTs. You can describe the target slide and element in natural language, and the system regenerates that slide through image-to-image editing while trying to preserve the original style and layout. One important caveat: the background and text in these PPTs are full-slide images. If your workflow depends on manually editing native PowerPoint text boxes and individual objects, this may not be the right fit.
 
