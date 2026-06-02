@@ -4,7 +4,7 @@
 
 **Generate design-forward, highly polished PPT decks with OpenAI `gpt-image-2` in one shot.**
 
-A Claude Code / Codex / OpenClaw / Hermes Skill. Once installed in your agent, a single natural-language prompt yields 16:9 high-res images + a ready-to-send `.pptx` — or clones any reference `.pptx` template and reskins it with new content.
+Works natively in Claude Code, Codex, OpenClaw, Hermes, and any other Skill-compatible agent. Once installed in your agent, a single natural-language prompt yields 16:9 high-res images + a ready-to-send `.pptx` — or clones any reference `.pptx` template and reskins it with new content.
 
 **Possibly one of the best-looking AI PPT Skills available today.** Instead of filling text into traditional templates, it uses the visual taste, composition, and layout strengths of `gpt-image-2` to generate each slide as a complete visual composition, aiming for decks that look polished, consistent, and presentation-ready from cover to inner pages.
 
@@ -118,7 +118,7 @@ Summary:
 
 ### Option 1: let your AI install it (recommended)
 
-Paste this prompt into your AI assistant (Claude Code / OpenClaw / Codex / Cursor / Trae / Hermes Agent — all work) and it will handle the install:
+Paste this prompt into your AI assistant (Claude Code / OpenClaw / Codex / Cursor / Trae / Hermes Agent, or any other agent that supports Skills) and it will handle the install:
 
 ```
 Please install gpt-image2-ppt-skills for me:
